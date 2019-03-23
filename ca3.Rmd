@@ -1,0 +1,137 @@
+---
+title: Programming Assignment 3
+author: Che Jung Lee - 301249826
+output:
+  html_document:
+    mathjax: default
+---
+```{r include=FALSE}
+library("randomForest")
+library("pROC")
+library("caret")
+library("e1071")
+```
+
+## Data preprocessing
+
+```{r}
+training <- read.csv("./data/Titanic.Train.csv", colClasses = c("factor","factor","factor","numeric","numeric","numeric","numeric"))
+test <- read.csv("./data/Titanic.Test.csv", colClasses = c("factor","factor","factor","numeric","numeric","numeric","numeric"))
+set.seed(1)
+```
+
+## Task 1
+
+```{r}
+# train random forest model
+rf.model <- randomForest(survived ~ ., data = training, ntree = 100, importance = TRUE)
+# predict test data
+rf.pred <- predict(rf.model, test)
+# print the accuracy of the model
+cat("accuracy of the random forest model:", mean(test$survived == rf.pred), "\n")
+
+# plot ROC curve
+rf.pred <- predict(rf.model, test, type = "prob")
+rf.roc <- roc(as.numeric(test$survived), rf.pred[, 1], plot = TRUE, grid = TRUE, print.auc = TRUE, auc.polygon = TRUE)
+cat("area under the curve:", rf.roc$auc, "\n")
+```
+
+As shown in the table below, the accuracy of the random forest model is higher than the decision tree model by 0.0648855, or 6.5%, which is a significant improvement.
+
+| Model         | Accuracy  |
+|---------------|-----------|
+| decision tree | 0.7748092 |
+| random forest | 0.8396947 |
+
+## Task 2
+
+```{r}
+# get variable importance
+rf.imp <- importance(rf.model)
+# sort accuracy in decreasing order
+rf.imp <- rf.imp[order(-rf.imp[, "MeanDecreaseAccuracy"]),]
+# print variable importance
+print(rf.imp)
+# plot variable importance (type 1 = mean decrease in accuracy, 2 = mean decrease in node impurity)
+varImpPlot(rf.model)
+```
+
+The top three most important attributes in terms of accuracy are **sex**, **age**, and **pclass** in decreasing order. Below is the reasoning of their relevance for the classification task:
+
+| Attribute | Reason                                                                                                                                                |
+|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| sex       | this supports the idea of "women and children first", which is a well known principle enforced by the captain of Titanic.                             |
+| age       | the same reason as above.                                                                                                                             |
+| pclass    | it is related to cabin, which is the room location on the ship. The higher the class, the higher the room, and thus the closer to deck and lifeboats. |
+
+## Task 3
+
+```{r}
+# train glmnet model
+glmnet.model <- train(survived ~ ., data = training, method = "glmnet", family = "binomial")
+# print variable importance
+print(varImp(glmnet.model))
+```
+
+Based on the _varImp_ results, the most significant three attributes of the model are **sex**, **pclass**, and **sibsp** in decreasing order. Below is the reasoning of their relevance for the classification task:
+
+| Attribute | Reason                                                                                                                                                |
+|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| sex       | this supports the idea of "women and children first", which is a well known principle enforced by the captain of Titanic.                             |
+| pclass    | it is related to cabin, which is the room location on the ship. The higher the class, the higher the room, and thus the closer to deck and lifeboats. |
+| sibsp     | it is related to family size. The lower the sibsp, the lesser the family members that one needs to take care of.                                      |
+
+## Task 4
+
+```{r}
+# predict test data
+glmnet.pred <- predict(glmnet.model, test)
+
+# print confusion matrix and accuracy
+print("confusion matrix of the glmnet model:")
+print(table(test$survived, glmnet.pred))
+cat("accuracy of the glmnet model:", mean(test$survived == glmnet.pred), "\n")
+
+# plot ROC curve
+glmnet.pred <- predict(glmnet.model, test, type = "prob")
+glmnet.roc <- roc(as.numeric(test$survived), glmnet.pred[, 1], plot = TRUE, grid = TRUE, print.auc = TRUE, auc.polygon = TRUE)
+cat("area under the curve:", glmnet.roc$auc, "\n")
+```
+
+## Task 5
+
+```{r}
+# tune svm models
+svm.linear.tune <- tune.svm(survived ~ ., data = training, kernel = "linear", cost=10^(-3:2), probability = TRUE)
+svm.radial.tune <- tune.svm(survived ~ ., data = training, kernel = "radial", cost=10^(-3:2), gamma=seq(.01, .1, by=0.01), probability = TRUE)
+print("best parameters for the linear kernel:")
+print(svm.linear.tune$best.parameters)
+print("best parameters for the radial kernel:")
+print(svm.radial.tune$best.parameters)
+```
+
+The best parameter for the linear kernel is $cost = 0.01$, where $cost$ denotes the penalty of misclassification. The higher the $cost$, the higher the penalty, resulting in a smaller margin separating hyperplane and lower misclassifications in the training data set. Conversely, the lower the $cost$, the lower the penalty, leading to a larger margin separating hyperplane and higher misclassifications. The former may cause overfitting and the latter may cause underfitting; the best one depends on the structure of the future data. In this case, low $cost$ value is the best.
+
+The best parameters for the radial kernel are $cost = 10$ and $gamma = 0.06$, where $gamma$ denotes the sensitivity to differences in feature spaces. The higher the $gamma$, the higher the sensitivity, resulting in higher influence of individual points and narrower decision boundary. Conversely, the lower the $gamma$, the lower the sensitivity, leading to lower influence of individual points and broader decision boundary. Again, the former may cause overfitting and the latter may cause underfitting; the best one depends on the structure of the future data. In this case, the configuration of high $cost$ and low $gamma$ yields the best performance.
+
+Note that $gamma$ is a parameter of the radial basis function (aka gaussian) kernel; thus it makes no sense to tune it in the linear kernel model.
+
+## Task 6
+
+```{r}
+# predict test data using the best models
+svm.linear.pred <- predict(svm.linear.tune$best.model, test, probability = TRUE)
+svm.radial.pred <- predict(svm.radial.tune$best.model, test, probability = TRUE)
+
+# print accuracy
+cat("accuracy of the tuned linear svm model:", mean(test$survived == svm.linear.pred), "\n")
+cat("accuracy of the tuned radial svm model:", mean(test$survived == svm.radial.pred), "\n")
+
+# plot ROC curve
+print("ROC curve of the linear svm model:")
+svm.linear.roc <- roc(as.numeric(test$survived), attr(svm.linear.pred, "probabilities")[, 1], plot = TRUE, grid = TRUE, print.auc = TRUE, auc.polygon = TRUE)
+cat("area under the curve:", svm.linear.roc$auc, "\n")
+print("ROC curve of the radial svm model:")
+svm.radial.roc <- roc(as.numeric(test$survived), attr(svm.radial.pred, "probabilities")[, 1], plot = TRUE, grid = TRUE, print.auc = TRUE, auc.polygon = TRUE)
+cat("area under the curve:", svm.radial.roc$auc, "\n")
+```
